@@ -1,0 +1,16 @@
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>CraftOS-PC/ComputerCraft Remote Connection</title>
+        <link rel="stylesheet" href="https://www.craftos-pc.cc/site.css" type="text/css">
+    </head>
+    <body style="padding: 20px; width: auto; height: auto;">
+        <h1 style="text-align: center">ComputerCraft VS Code Connection</h1>
+        <p>Use this page to access a ComputerCraft server from inside Visual Studio Code.</p>
+        <p>To use this, you must have the CraftOS-PC extension installed in VS Code. <a href="https://marketplace.visualstudio.com/items?itemName=jackmacwindows.craftos-pc">Click here to install it if you haven't.</a></p>
+        <ol>
+            <li>Paste this into your ComputerCraft computer: <code>wget run <%= url.replace(/^ws/, "http") %>server.lua <%= id %></code></li>
+            <li>Click this button to open the computer in VS Code: <a href="vscode://JackMacWindows.craftos-pc/<%= url + id %>">Connect Now</a></li>
+        </ol>
+    </body>
+</html>
