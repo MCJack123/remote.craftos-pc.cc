@@ -77,7 +77,7 @@ wsServer.on('connection', (socket, request) => {
         for (let s of connectionPools[url]) if (s !== socket) s.send(message);
     });
     socket.on('close', () => {
-        connectionPools[url] = connectionPools[url].splice(connectionPools[url].findIndex(v => v == socket), 1);
+        connectionPools[url].splice(connectionPools[url].indexOf(socket), 1);
         if (isServer) for (let s of connectionPools[url]) s.close();
         if (connectionPools[url].length === 0) {
             delete connectionPools[url];
