@@ -10,7 +10,30 @@ import pmx from "@pm2/io";
 import { collectDefaultMetrics, register, Gauge } from "prom-client";
 import { ip, port, isSecure } from "./config.json";
 
-let connectionPools: {[key: string]: WebSocket[]} = {}
+var crcTable: [number];
+
+function makeCRCTable() {
+    let c;
+    let crcTable = [];
+    for (let n = 0; n < 256; n++) {
+        c = n;
+        for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+        crcTable[n] = c;
+    }
+    return crcTable;
+}
+
+function crc32(str: string) {
+    crcTable = crcTable || makeCRCTable();
+    let crc = 0 ^ (-1);
+    for (let i = 0; i < str.length; i++) {
+        crc = (crc >>> 8) ^ crcTable[(crc ^ str.charCodeAt(i)) & 0xFF];
+    }
+    return (crc ^ (-1)) >>> 0;
+};
+
+let connectionPools: {[key: string]: WebSocket[]} = {};
+let connectionPoolOpen: {[key: string]: number} = {};
 
 const app = express();
 const serverURL = `ws${isSecure ? "s" : ""}://${ip}:${port}/`;
@@ -33,6 +56,7 @@ let pipeCounter = new Gauge({name: "http_active_pipes", help: "Active Pipes"});
 
 let awaitingRestart = false;
 let pipeCount = 0;
+
 pmx.action("schedule-restart", (reply: (res: any) => void) => {
     if (pipeCount === 0) {
         reply("Exiting NOW!");
@@ -41,6 +65,42 @@ pmx.action("schedule-restart", (reply: (res: any) => void) => {
         awaitingRestart = true;
         reply("Restart scheduled - waiting for all pipes to close.");
     }
+});
+
+pmx.action("send-message", (param: string, reply: (res: any) => void) => {
+    if (typeof param === "function") {
+        (param as (res: any) => void)("Missing parameter");
+        return;
+    }
+    const buf = Buffer.alloc(27 + param.length);
+    buf.fill(0);
+    buf[0] = 5;
+    buf[2] = 0x40;
+    buf.write("Message from server", 6);
+    buf.write(param, 26);
+    const b64 = buf.toString("base64");
+    // Send one packet with binary encoding and one packet without to make sure both get the packet
+    // (We can't tell what the connections are using from here)
+    const packet = "!CPC" + ("000" + b64.length.toString(16)).slice(-4) + b64 + ("0000000" + crc32(b64).toString(16)).slice(-8) + "\n";
+    const bpacket = "!CPC" + ("000" + b64.length.toString(16)).slice(-4) + b64 + ("0000000" + crc32(buf.toString("binary")).toString(16)).slice(-8) + "\n";
+    for (let x in connectionPools) {
+        for (let socket of connectionPools[x]) {
+            socket.send(packet);
+            socket.send(bpacket);
+        }
+    }
+    reply("Message sent.");
+});
+
+pmx.action("reload", (reply: (res: any) => void) => {
+    fs.readFile("server.lua", {encoding: "utf8"}).then(data => serverFile = data);
+    fs.readFile("rawterm.lua", {encoding: "utf8"}).then(data => rawtermFile = data);
+    fs.readFile("index.ejs", {encoding: "utf8"}).then(data => indexFile = data);
+    if (isSecure) {
+        key = readFileSync(`/etc/letsencrypt/live/remote.craftos-pc.cc/privkey.pem`);
+        cert = readFileSync(`/etc/letsencrypt/live/remote.craftos-pc.cc/fullchain.pem`);
+    }
+    reply("Reloaded all files.");
 });
 
 function makeID(): string {
@@ -81,6 +141,7 @@ wsServer.on('connection', (socket, request) => {
     const isServer = request.headers["X-Rawterm-Is-Server"] === "Yes";
     if (connectionPools[url] === undefined) {
         connectionPools[url] = [];
+        connectionPoolOpen[url] = Date.now();
         pipeCounter.inc();
         pipeCount++;
     }
@@ -95,12 +156,21 @@ wsServer.on('connection', (socket, request) => {
         if (isServer) for (let s of connectionPools[url]) s.close();
         if (connectionPools[url].length === 0) {
             delete connectionPools[url];
+            delete connectionPoolOpen[url];
             pipeCounter.dec();
-            if (--pipeCount === 0) process.exit(0);
+            if (--pipeCount === 0 && awaitingRestart) process.exit(0);
         }
         connectionCounter.dec();
     });
 });
+
+// Clean up any pipes that only have one connection every few minutes
+setInterval(() => {
+    const now = Date.now();
+    for (let x in connectionPools)
+        if (connectionPools[x].length === 1 && now - connectionPoolOpen[x] > 60000)
+            connectionPools[x][0].close();
+}, 10 * 60 * 1000);
 
 const server = isSecure ? https.createServer({key: key, cert: cert}, app).listen(443, ip) : app.listen(port, ip);
 server.on('upgrade', (request: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
