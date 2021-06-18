@@ -1,4 +1,4 @@
-import express, { Request } from "express";
+import express from "express";
 import WebSocket from "ws";
 import fs from "fs/promises";
 import {readFileSync} from "fs";
@@ -6,6 +6,7 @@ import ejs from "ejs";
 import http from "http";
 import https from "https";
 import net from "net";
+import { collectDefaultMetrics, register, Gauge } from "prom-client";
 import { ip, port, isSecure } from "./config.json";
 
 let connectionPools: {[key: string]: WebSocket[]} = {}
@@ -24,6 +25,10 @@ if (isSecure) {
     key = readFileSync(`/etc/letsencrypt/live/remote.craftos-pc.cc/privkey.pem`);
     cert = readFileSync(`/etc/letsencrypt/live/remote.craftos-pc.cc/fullchain.pem`);
 }
+
+collectDefaultMetrics();
+let connectionCounter = new Gauge({name: "http_active_connections", help: "Active Connections"});
+let pipeCounter = new Gauge({name: "http_active_pipes", help: "Active Pipes"});
 
 function makeID(): string {
     const buf = Buffer.alloc(30);
@@ -61,8 +66,12 @@ const wsServer = new WebSocket.Server({ noServer: true });
 wsServer.on('connection', (socket, request) => {
     const url: string = request.url!;
     const isServer = request.headers["X-Rawterm-Is-Server"] === "Yes";
-    if (connectionPools[url] === undefined) connectionPools[url] = [];
+    if (connectionPools[url] === undefined) {
+        connectionPools[url] = [];
+        pipeCounter.inc();
+    }
     connectionPools[url].push(socket);
+    connectionCounter.inc();
     socket.on('message', message => {
         //console.log(message);
         for (let s of connectionPools[url]) if (s !== socket) s.send(message);
@@ -70,7 +79,11 @@ wsServer.on('connection', (socket, request) => {
     socket.on('close', () => {
         connectionPools[url] = connectionPools[url].splice(connectionPools[url].findIndex(v => v == socket), 1);
         if (isServer) for (let s of connectionPools[url]) s.close();
-        if (connectionPools[url].length === 0) delete connectionPools[url];
+        if (connectionPools[url].length === 0) {
+            delete connectionPools[url];
+            pipeCounter.dec();
+        }
+        connectionCounter.dec();
     });
 });
 
@@ -80,6 +93,17 @@ server.on('upgrade', (request: http.IncomingMessage, socket: net.Socket, head: B
         wsServer.emit('connection', socket, request);
     });
 });
+
+const app2 = express();
+app2.get("/metrics", async (_req, res) => {
+    try {
+        res.set('Content-Type', register.contentType);
+        res.end(await register.metrics());
+    } catch (err) {
+        res.status(500).end(err);
+    }
+});
+app2.listen(9991, "0.0.0.0");
 
 if (isSecure) {
     // https://stackoverflow.com/a/7458587/2032154
