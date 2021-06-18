@@ -6,6 +6,7 @@ import ejs from "ejs";
 import http from "http";
 import https from "https";
 import net from "net";
+import pmx from "@pm2/io";
 import { collectDefaultMetrics, register, Gauge } from "prom-client";
 import { ip, port, isSecure } from "./config.json";
 
@@ -29,6 +30,18 @@ if (isSecure) {
 collectDefaultMetrics();
 let connectionCounter = new Gauge({name: "http_active_connections", help: "Active Connections"});
 let pipeCounter = new Gauge({name: "http_active_pipes", help: "Active Pipes"});
+
+let awaitingRestart = false;
+let pipeCount = 0;
+pmx.action("schedule-restart", (reply: (res: any) => void) => {
+    if (pipeCount === 0) {
+        reply("Exiting NOW!");
+        process.exit(0);
+    } else {
+        awaitingRestart = true;
+        reply("Restart scheduled - waiting for all pipes to close.");
+    }
+});
 
 function makeID(): string {
     const buf = Buffer.alloc(30);
@@ -69,6 +82,7 @@ wsServer.on('connection', (socket, request) => {
     if (connectionPools[url] === undefined) {
         connectionPools[url] = [];
         pipeCounter.inc();
+        pipeCount++;
     }
     connectionPools[url].push(socket);
     connectionCounter.inc();
@@ -82,6 +96,7 @@ wsServer.on('connection', (socket, request) => {
         if (connectionPools[url].length === 0) {
             delete connectionPools[url];
             pipeCounter.dec();
+            if (--pipeCount === 0) process.exit(0);
         }
         connectionCounter.dec();
     });
