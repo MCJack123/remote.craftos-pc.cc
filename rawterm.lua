@@ -276,6 +276,10 @@ local function minver(version)
     local res
     if _CC_VERSION then res = version <= _CC_VERSION
     elseif not _HOST then res = version <= os.version():gsub("CraftOS ", "")
+    elseif _HOST:match("ComputerCraft 1%.1%d+") ~= version:match("1%.1%d+") then
+      version = version:gsub("(1%.)([02-9])", "%10%2")
+      local host = _HOST:gsub("(ComputerCraft 1%.)([02-9])", "%10%2")
+      res = version <= host:match("ComputerCraft ([0-9%.]+)")
     else res = version <= _HOST:match("ComputerCraft ([0-9%.]+)") end
     assert(res, "This program requires ComputerCraft " .. version .. " or later.")
 end
@@ -381,7 +385,7 @@ local fsFunctions = {[0] = fs.exists, fs.isDir, fs.isReadOnly, fs.getSize, fs.ge
 local openModes = {[0] = "r", "w", "r", "a", "rb", "wb", "rb", "ab"}
 local localEvents = {key = true, key_up = true, char = true, mouse_click = true, mouse_up = true, mouse_drag = true, mouse_scroll = true, mouse_move = true, term_resize = true, paste = true}
 
-minver "1.91.0"
+if not string.pack then minver "1.91.0" end
 
 --- Creates a new server window object with the specified properties.
 -- This object functions like an object from the window API, and can be used as
@@ -402,8 +406,9 @@ minver "1.91.0"
 -- @param x If parent is specified, the X coordinate to start at. This defaults to 1.
 -- @param y If parent is specified, the Y coordinate to start at. This defaults to 1.
 -- @param blockFSAccess Set this to true to disable filesystem access for clients.
+-- @param isMonitor Whether the terminal identifies as a monitor.
 -- @return The new window object.
-function rawterm.server(delegate, width, height, id, title, parent, x, y, blockFSAccess)
+function rawterm.server(delegate, width, height, id, title, parent, x, y, blockFSAccess, isMonitor)
     expect(1, delegate, "table")
     expect(2, width, "number")
     expect(3, height, "number")
@@ -421,11 +426,12 @@ function rawterm.server(delegate, width, height, id, title, parent, x, y, blockF
 
     local win, mode, cursorX, cursorY, current_colors, visible, canBlink, isClosed, changed = {}, 0, 1, 1, 0xF0, true, false, false, true
     local screen, colors, pixels, palette, fileHandles = {}, {}, {}, {}, {}
-    local flags = {
+    local flags = delegate.flags or {
         isVersion11 = false,
         filesystem = false,
         binaryChecksum = false
     }
+    delegate.flags = flags
     for i = 1, height do screen[i], colors[i] = (" "):rep(width), ("\xF0"):rep(width) end
     for i = 1, height*9 do pixels[i] = ("\x0F"):rep(width*6) end
     for i = 0, 15 do palette[i] = {(parent or term).getPaletteColor(2^i)} end
@@ -437,7 +443,7 @@ function rawterm.server(delegate, width, height, id, title, parent, x, y, blockF
         if #payload > 65535 and flags.isVersion11 then d = "!CPD" .. string.format("%012X", #payload)
         else d = "!CPC" .. string.format("%04X", #payload) end
         d = d .. payload
-        if flags.binaryChecksum then d = d .. ("%08X"):format(crc32(string.char(type) .. string.char(id or 0) .. data))
+        if flags.binaryChecksum and id ~= 6 then d = d .. ("%08X"):format(crc32(string.char(type) .. string.char(id or 0) .. data))
         else d = d .. ("%08X"):format(crc32(payload)) end
         return d .. "\n"
     end
@@ -816,7 +822,7 @@ function rawterm.server(delegate, width, height, id, title, parent, x, y, blockF
             end
             height = nheight
         end
-        if resized and not isClosed then delegate:send(makePacket(4, id, string.pack("<BBHHz", 0, os.computerID(), width, height, title))) end
+        if resized and not isClosed then delegate:send(makePacket(4, id, string.pack("<BBHHz", 0, isMonitor and 0 or os.computerID() % 256, width, height, title))) end
         changed = true
         win.redraw()
     end
@@ -829,14 +835,19 @@ function rawterm.server(delegate, width, height, id, title, parent, x, y, blockF
     -- @param ignoreLocalEvents Set this to a truthy value to ignore receiving
     -- input events from the local computer, making the terminal otherwise
     -- isolated from the rest of the system.
+    -- @param ignoreAllEvents Set this to a truthy value to ignore all local events.
     -- @return The event name and arguments.
-    function win.pullEvent(filter, ignoreLocalEvents)
+    function win.pullEvent(filter, ignoreLocalEvents, ignoreAllEvents)
         expect(1, filter, "string", "nil")
         local ev
         parallel.waitForAny(function()
             if isClosed then while true do coroutine.yield() end end
             while true do
                 local msg = delegate:receive()
+                if not msg then
+                    isClosed = true
+                    error("Connection closed")
+                end
                 if msg:sub(1, 3) == "!CP" then
                     local off = 8
                     if msg:sub(4, 4) == 'D' then off = 16 end
@@ -844,8 +855,8 @@ function rawterm.server(delegate, width, height, id, title, parent, x, y, blockF
                     local payload = msg:sub(off + 1, off + size)
                     local expected = tonumber(msg:sub(off + size + 1, off + size + 8), 16)
                     local data = base64decode(payload)
+                    local typ, wid = data:byte(1, 2)
                     if crc32(flags.binaryChecksum and data or payload) == expected then
-                        local typ, wid = data:byte(1, 2)
                         if wid == id then
                             if typ == 1 then
                                 local ch, flags = data:byte(3, 4)
@@ -903,7 +914,7 @@ function rawterm.server(delegate, width, height, id, title, parent, x, y, blockF
                                     local file, err = fs.open(path, openModes[bit32.band(reqtype, 7)])
                                     if file then
                                         if bit32.btest(reqtype, 1) then fileHandles[reqid] = file else
-                                            delegate:send(makePacket(9, id, string.pack("<BBs4", 0, reqid, file.readAll())))
+                                            delegate:send(makePacket(9, id, string.pack("<BBs4", 0, reqid, file.readAll() or "")))
                                             file.close()
                                         end
                                     else
@@ -922,18 +933,19 @@ function rawterm.server(delegate, width, height, id, title, parent, x, y, blockF
                                 else delegate:send(makePacket(8, id, string.pack("<BBz", 17, reqid, "Unknown request ID"))) end
                             end
                         end
-                        if typ == 6 then
-                            flags.isVersion11 = true
-                            local f = string.unpack("<H", data, 3)
-                            if wid == id then delegate:send(makePacket(6, wid, string.pack("<H", 1 + (blockFSAccess and 0 or 2)))) end
-                            if bit32.btest(f, 0x01) then flags.binaryChecksum = true end
-                            if bit32.btest(f, 0x02) and not blockFSAccess then flags.filesystem = true end
-                            if bit32.btest(f, 0x04) then delegate:send(makePacket(4, id, string.pack("<BBHHz", 0, os.computerID(), width, height, title))) changed = true end
-                        end
+                    end
+                    if typ == 6 then
+                        flags.isVersion11 = true
+                        local f = string.unpack("<H", data, 3)
+                        if wid == id then delegate:send(makePacket(6, wid, string.pack("<H", 1 + (blockFSAccess and 0 or 2)))) end
+                        if bit32.btest(f, 0x01) then flags.binaryChecksum = true end
+                        if bit32.btest(f, 0x02) and not blockFSAccess then flags.filesystem = true end
+                        if bit32.btest(f, 0x04) then delegate:send(makePacket(4, id, string.pack("<BBHHz", 0, isMonitor and 0 or os.computerID() % 256, width, height, title))) changed = true end
                     end
                 end
             end
         end, function()
+            if ignoreAllEvents then while true do coroutine.yield() end end
             repeat
                 ev = nil
                 ev = table.pack(os.pullEventRaw(filter))
@@ -948,7 +960,7 @@ function rawterm.server(delegate, width, height, id, title, parent, x, y, blockF
         expect(1, title, "string")
         title = t
         if isClosed then return end
-        delegate:send(makePacket(4, id, string.pack("<BBHHz", 0, os.computerID(), width, height, title)))
+        delegate:send(makePacket(4, id, string.pack("<BBHHz", 0, isMonitor and 0 or os.computerID() % 256, width, height, title)))
     end
 
     --- Sends a message to the client.
@@ -970,14 +982,15 @@ function rawterm.server(delegate, width, height, id, title, parent, x, y, blockF
 
     --- Closes the window connection. Any changes made to the screen will still
     -- show on the parent window if defined.
-    function win.close()
+    function win.close(keepAlive)
         if isClosed then return end
-        delegate:send(makePacket(4, id, string.pack("<BBHHz", 2, 0, 0, 0, "")))
-        if delegate.close then delegate:close() end
+        delegate:send(makePacket(4, id, string.pack("<BBHHz", keepAlive and 1 or 2, 0, 0, 0, "")))
+        if delegate.close and not keepAlive then delegate:close() end
         isClosed = true
     end
 
-    delegate:send(makePacket(4, id, string.pack("<BBHHz", 0, os.computerID(), width, height, title)))
+    if parent then for k, v in pairs(parent) do if win[k] == nil then win[k] = v end end end
+    delegate:send(makePacket(4, id, string.pack("<BBHHz", 0, isMonitor and 0 or os.computerID() % 256, width, height, title)))
 
     return win
 end
@@ -1156,7 +1169,7 @@ function rawterm.client(delegate, id, window)
                         if closed then error("attempt to use closed file", 2) end
                         if pos >= #data then return nil end
                         local oldpos, line = pos
-                        line, pos = data:match("([^\n]" .. (strip and "+)\n" or "*\n)")"()", pos)
+                        line, pos = data:match("([^\n]" .. (strip and "+)\n" or "*\n)").."()", pos)
                         if not pos then
                             line = data:sub(pos)
                             pos = #data

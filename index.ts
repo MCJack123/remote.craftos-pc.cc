@@ -5,8 +5,10 @@ import {readFileSync} from "fs";
 import ejs from "ejs";
 import http from "http";
 import https from "https";
+import tls from "tls";
 import net from "net";
 import pmx from "@pm2/io";
+import luamin from "luamin";
 import { collectDefaultMetrics, register, Gauge } from "prom-client";
 import { ip, port, isSecure } from "./config.json";
 
@@ -40,14 +42,18 @@ const serverURL = `ws${isSecure ? "s" : ""}://${ip}:${port}/`;
 
 let serverFile: string;
 let rawtermFile: string;
+let stringPackFile: string;
 let indexFile: string;
-fs.readFile("server.lua", {encoding: "utf8"}).then(data => serverFile = data);
-fs.readFile("rawterm.lua", {encoding: "utf8"}).then(data => rawtermFile = data);
+fs.readFile("server.lua", {encoding: "utf8"}).then(data => serverFile = luamin.minify(data));
+fs.readFile("rawterm.lua", {encoding: "utf8"}).then(data => rawtermFile = luamin.minify(data));
+fs.readFile("string_pack.lua", {encoding: "utf8"}).then(data => stringPackFile = luamin.minify(data));
 fs.readFile("index.ejs", {encoding: "utf8"}).then(data => indexFile = data);
-let key: Buffer | undefined, cert: Buffer | undefined;
+let ctx: tls.SecureContext | undefined;
 if (isSecure) {
-    key = readFileSync(`/etc/letsencrypt/live/remote.craftos-pc.cc/privkey.pem`);
-    cert = readFileSync(`/etc/letsencrypt/live/remote.craftos-pc.cc/fullchain.pem`);
+    ctx = tls.createSecureContext({
+        key: readFileSync(`/etc/letsencrypt/live/remote.craftos-pc.cc/privkey.pem`),
+        cert: readFileSync(`/etc/letsencrypt/live/remote.craftos-pc.cc/fullchain.pem`)
+    });
 }
 
 collectDefaultMetrics();
@@ -93,12 +99,15 @@ pmx.action("send-message", (param: string, reply: (res: any) => void) => {
 });
 
 pmx.action("reload", (reply: (res: any) => void) => {
-    fs.readFile("server.lua", {encoding: "utf8"}).then(data => serverFile = data);
-    fs.readFile("rawterm.lua", {encoding: "utf8"}).then(data => rawtermFile = data);
+    fs.readFile("server.lua", {encoding: "utf8"}).then(data => serverFile = luamin.minify(data));
+    fs.readFile("rawterm.lua", {encoding: "utf8"}).then(data => rawtermFile = luamin.minify(data));
+    fs.readFile("string_pack.lua", {encoding: "utf8"}).then(data => stringPackFile = luamin.minify(data));
     fs.readFile("index.ejs", {encoding: "utf8"}).then(data => indexFile = data);
     if (isSecure) {
-        key = readFileSync(`/etc/letsencrypt/live/remote.craftos-pc.cc/privkey.pem`);
-        cert = readFileSync(`/etc/letsencrypt/live/remote.craftos-pc.cc/fullchain.pem`);
+        ctx = tls.createSecureContext({
+            key: readFileSync(`/etc/letsencrypt/live/remote.craftos-pc.cc/privkey.pem`),
+            cert: readFileSync(`/etc/letsencrypt/live/remote.craftos-pc.cc/fullchain.pem`)
+        });
     }
     reply("Reloaded all files.");
 });
@@ -126,7 +135,7 @@ app.get("/new", (req, res) => {
 app.get("/server.lua", (req, res) => {
     const url = getURL(req);
     res.contentType(".lua");
-    res.send(serverFile.replace("${URL}", url));
+    res.send(serverFile.replace("${URL}", url).replace("[[${SIZE}]]", `(${rawtermFile.length})`));
 });
 
 app.get("/rawterm.lua", (req, res) => {
@@ -134,6 +143,16 @@ app.get("/rawterm.lua", (req, res) => {
     res.send(rawtermFile);
 });
 
+app.get("/string_pack.lua", (req, res) => {
+    res.contentType(".lua");
+    res.send(stringPackFile);
+});
+
+app.get("/.well-known/acme-challenge/:file", (req, res) => {
+    fs.readFile(".well-known/acme-challenge/" + req.params.file)
+        .then(data => res.send(data))
+        .catch(() => res.status(404).send("404 Not Found"));
+});
 
 const wsServer = new WebSocket.Server({ noServer: true });
 wsServer.on('connection', (socket, request) => {
@@ -172,7 +191,7 @@ setInterval(() => {
             connectionPools[x][0].close();
 }, 10 * 60 * 1000);
 
-const server = isSecure ? https.createServer({key: key, cert: cert}, app).listen(443, ip) : app.listen(port, ip);
+const server = isSecure ? https.createServer({SNICallback: (servername, cb) => cb(null, ctx!)}, app).listen(443, ip) : app.listen(port, ip);
 server.on('upgrade', (request: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
     wsServer.handleUpgrade(request, socket, head, socket => {
         wsServer.emit('connection', socket, request);

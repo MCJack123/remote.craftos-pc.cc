@@ -3,6 +3,16 @@
         <meta charset="utf-8">
         <title>CraftOS-PC/ComputerCraft Remote Connection</title>
         <link rel="stylesheet" href="https://www.craftos-pc.cc/site.css" type="text/css">
+	<meta name="theme-color" content="#DEDE6C">
+        <meta property="og:site_name" content="CraftOS-PC Remote">
+        <meta property="og:title" content="CraftOS-PC Remote">
+        <meta property="og:description" content="The CraftOS-PC Remote service allows you to access remote ComputerCraft computers and browse their files inside VS Code.">
+        <meta property="og:image" content="https://www.craftos-pc.cc/images/vscode.png">
+        <meta property="og:url" content="https://remote.craftos-pc.cc/">
+        <meta property="twitter:title" content="CraftOS-PC Remote">
+        <meta property="twitter:description" content="The CraftOS-PC Remote service allows you to access remote ComputerCraft computers and browse their files inside VS Code.">
+        <meta property="twitter:image" content="https://www.craftos-pc.cc/images/vscode.png">
+        <meta property="twitter:card" content="summary_large_index">
     </head>
     <body style="padding: 20px; width: auto; height: auto;">
         <h1 style="text-align: center">ComputerCraft VS Code Connection</h1>
@@ -12,5 +22,7 @@
             <li>Paste this into your ComputerCraft computer: <code>wget run <%= url.replace(/^ws/, "http") %>server.lua <%= id %></code></li>
             <li>Click this button to open the computer in VS Code: <a href="vscode://JackMacWindows.craftos-pc/<%= url + id %>">Connect Now</a></li>
         </ol>
+        <p>More information is available <a href="https://www.craftos-pc.cc/docs/remote">on the CraftOS-PC website</a>.</p>
+        <iframe width="560" height="315" src="https://www.youtube-nocookie.com/embed/HtafiCaT6CI" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
     </body>
 </html>
