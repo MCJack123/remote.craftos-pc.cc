@@ -1423,7 +1423,14 @@ end
 local wsDelegate, rednetDelegate = {}, {}
 wsDelegate.__index, rednetDelegate.__index = wsDelegate, rednetDelegate
 function wsDelegate:send(data) return self._ws.send(data) end
-function wsDelegate:receive(timeout) return self._ws.receive(timeout) end
+function wsDelegate:receive(timeout)
+    while true do
+        local _, ws_url, contents, binary = os.pullEvent("websocket_message")
+        if ws_url == self.url then
+            return contents, binary
+        end
+    end
+end
 function wsDelegate:close() return self._ws.close() end
 function rednetDelegate:send(data) return rednet.send(self._id, data, self._protocol) end
 function rednetDelegate:receive(timeout)
@@ -1447,7 +1454,7 @@ function rawterm.wsDelegate(url, headers)
     expect(2, headers, "table", "nil")
     local ws, err = http.websocket(url, headers)
     if not ws then return nil, err end
-    return setmetatable({_ws = ws}, wsDelegate)
+    return setmetatable({_ws = ws, url = url}, wsDelegate)
 end
 
 --- Creates a basic delegate object that communicates over Rednet.
