@@ -11,6 +11,7 @@ import pmx from "@pm2/io";
 import luamin from "luamin";
 import { collectDefaultMetrics, register, Gauge } from "prom-client";
 import { ip, port, isSecure } from "./config.json";
+import music from "./music";
 
 var crcTable: [number];
 
@@ -153,6 +154,9 @@ app.get("/.well-known/acme-challenge/:file", (req, res) => {
         .then(data => res.send(data))
         .catch(() => res.status(404).send("404 Not Found"));
 });
+
+app.use("/music", music("/music", isSecure));
+app.get("/music", (req, res) => res.redirect(301, "/music/"));
 
 const wsServer = new WebSocket.Server({ noServer: true });
 wsServer.on('connection', (socket, request) => {

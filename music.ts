@@ -1,5 +1,6 @@
 import fs from "fs";
 import express from "express";
+import rateLimit from "express-rate-limit";
 import ffmpeg from "fluent-ffmpeg";
 import {Readable} from "stream";
 
@@ -13,6 +14,8 @@ function getCachedFile(name: string) {
 
 export = function(url: string, isSecure: boolean): express.Router {
     let route = express.Router();
+
+    route.use(rateLimit({windowMs: 15 * 60 * 1000, max: 40, standardHeaders: true, legacyHeaders: true}));
 
     route.get('/', (req, res) => {res.set("Content-Type", "text/html"); res.send(getCachedFile("index.html"));});
     route.get('/index.js', (req, res) => {res.set("Content-Type", "application/javascript"); res.send(getCachedFile("index.js").replace(/\$URL_PLACEHOLDER/g, (isSecure ? "https://" : "http://") + req.hostname + url));});

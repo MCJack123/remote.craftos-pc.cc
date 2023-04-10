@@ -45,10 +45,23 @@ local arg, cmd = ...
 print("Connecting to " .. url .. "...")
 local conn, err = rawterm.wsDelegate(url .. arg, {["X-Rawterm-Is-Server"] = "Yes"})
 if not conn then error("Could not connect to server: " .. err) end
-local oldClose, oldReceive = conn.close, conn.receive
+local oldClose, oldReceive, oldSend = conn.close, conn.receive, conn.send
 local isOpen = true
 function conn:close() isOpen = false return oldClose(self) end
-function conn:receive(...) local res repeat res = table.pack(pcall(oldReceive, self, ...)) until not (not ok and res[2]:match("Terminated$")) return table.unpack(res, 2, res.n) end
+function conn:receive(...)
+    if not isOpen then return nil end
+    local buf, res, size = ""
+    repeat
+        repeat res = table.pack(pcall(oldReceive, self, ...))
+        until not (not res[1] and res[2]:match("Terminated$"))
+        if not res[1] then error(res[2])
+        elseif not res[2] then return nil end
+        if not size then size = tonumber(res[2]:match "!CPC(%x%x%x%x)" or res[2]:match("!CPD(" .. ("%x"):rep(12) .. ")") or "", 16) end
+        if size then buf = buf .. res[2]:gsub("\n", "") end
+    until size and #buf >= size + 16 + (buf:match "^!CPD" and 8 or 0)
+    return buf .. "\n"
+end
+function conn:send(data) if isOpen then for i = 1, #data, 65530 do oldSend(self, data:sub(i, math.min(i + 65529, #data))) end end end
 local w, h = term.getSize()
 local win = rawterm.server(conn, w, h, 0, "ComputerCraft Remote Terminal: " .. (os.computerLabel() or ("Computer " .. os.computerID())), term.current())
 win.setVisible(false)
@@ -119,6 +132,8 @@ end, function()
             win.reposition(nil, nil, term.getSize())
         elseif ev == "monitor_resize" and monitors[side] then
             monitors[side].win.reposition(nil, nil, oldcall(side, "getSize"))
+        elseif ev == "websocket_closed" and side == url .. arg then
+            isOpen = false
         end
     end
 end)

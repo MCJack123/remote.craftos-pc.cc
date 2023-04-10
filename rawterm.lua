@@ -356,9 +356,9 @@ local function decodeIBT(data, pos)
         for i = 1, nent do t[keys[i]], pos = decodeIBT(data, pos) end
         return t, pos
     else return nil, pos end
-    local d = string.unpack(pat, data, pos)
+    local d
+    d, pos = string.unpack(pat, data, pos)
     if ptyp == 2 then d = d ~= 0 end
-    pos = pos + string.packsize(pat)
     return d, pos
 end
 
@@ -382,6 +382,17 @@ end
 
 local mouse_events = {[0] = "mouse_click", "mouse_up", "mouse_scroll", "mouse_drag"}
 local fsFunctions = {[0] = fs.exists, fs.isDir, fs.isReadOnly, fs.getSize, fs.getDrive, fs.getCapacity, fs.getFreeSpace, fs.list, fs.attributes, fs.find, fs.makeDir, fs.delete, fs.copy, fs.move, function() end, function() end}
+if not fs.attributes then fsFunctions[8] = function(path)
+    expect(1, path, "string")
+    if not fs.exists(path) then return nil end
+    return {
+        size = fs.getSize(path),
+        isDir = fs.isDir(path),
+        isReadOnly = fs.isReadOnly(path),
+        created = 0,
+        modified = 0
+    }
+end end
 local openModes = {[0] = "r", "w", "r", "a", "rb", "wb", "rb", "ab"}
 local localEvents = {key = true, key_up = true, char = true, mouse_click = true, mouse_up = true, mouse_drag = true, mouse_scroll = true, mouse_move = true, term_resize = true, paste = true}
 
@@ -522,6 +533,7 @@ function rawterm.server(delegate, width, height, id, title, parent, x, y, blockF
     function win.setCursorPos(cx, cy)
         expect(1, cx, "number")
         expect(2, cy, "number")
+        cx, cy = math.floor(cx), math.floor(cy)
         if cx == cursorX and cy == cursorY then return end
         cursorX, cursorY = cx, cy
         changed = true
@@ -732,6 +744,7 @@ function rawterm.server(delegate, width, height, id, title, parent, x, y, blockF
                 elseif parent.drawPixels then
                     parent.drawPixels((x - 1) * 6, (y - 1) * 9, pixels, width, height)
                 end
+                for i = 0, (parent.getGraphicsMode and mode == 2 and 255 or 15) do parent.setPaletteColor(2^i, table.unpack(palette[i])) end
             end
             -- Draw to raw target
             if not isClosed then
@@ -827,6 +840,20 @@ function rawterm.server(delegate, width, height, id, title, parent, x, y, blockF
         win.redraw()
     end
 
+    -- Monitor functions (if available)
+    if parent.setTextScale then
+        function win.getTextScale()
+            return parent.getTextScale()
+        end
+
+        function win.setTextScale(scale)
+            expect(1, scale, "number")
+            parent.setTextScale(scale)
+            width, height = parent.getSize()
+            if resized and not isClosed then delegate:send(makePacket(4, id, string.pack("<BBHHz", 0, isMonitor and 0 or os.computerID() % 256, width, height, title))) end
+        end
+    end
+
     -- Raw functions
 
     --- A wrapper for os.pullEvent() that also listens for raw events, and returns
@@ -896,7 +923,7 @@ function rawterm.server(delegate, width, height, id, title, parent, x, y, blockF
                                         elseif type(val) == "number" then delegate:send(makePacket(8, id, string.pack("<BBI4", reqtype, reqid, val)))
                                         elseif type(val) == "string" then delegate:send(makePacket(8, id, string.pack("<BBz", reqtype, reqid, val)))
                                         elseif reqtype == 8 then
-                                            if val then delegate:send(makePacket(8, id, string.pack("<BBI4I8I8BBBB", reqtype, reqid, val.size, val.created, val.modified, val.isDir and 1 or 0, val.isReadOnly and 1 or 0, 0, 0)))
+                                            if val then delegate:send(makePacket(8, id, string.pack("<BBI4I8I8BBBB", reqtype, reqid, val.size, val.created or 0, val.modified or val.modification or 0, val.isDir and 1 or 0, val.isReadOnly and 1 or 0, 0, 0)))
                                             else delegate:send(makePacket(8, id, string.pack("<BBI4I8I8BBBB", reqtype, reqid, 0, 0, 0, 0, 0, 1, 0))) end
                                         elseif type(val) == "table" then
                                             local list = ""
