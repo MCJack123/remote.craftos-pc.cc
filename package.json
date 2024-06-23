@@ -11,7 +11,7 @@
   "license": "ISC",
   "dependencies": {
     "@pm2/io": "^5.0.0",
-    "ejs": "^3.1.6",
+    "ejs": "^3.1.10",
     "express": "^4.17.1",
     "express-rate-limit": "^6.6.0",
     "fluent-ffmpeg": "^2.1.2",
