@@ -10,7 +10,7 @@
     },
     "files": [
         "decl.d.ts",
-        "index.ts",
-        "music.ts"
+        "standalone.ts",
+        "src/music.ts"
     ]
 }

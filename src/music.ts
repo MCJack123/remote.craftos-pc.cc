@@ -7,7 +7,7 @@ import {Readable} from "stream";
 var cache: {[key: string]: string} = {}
 function getCachedFile(name: string) {
     if (cache[name] !== undefined) return cache[name];
-    let data = fs.readFileSync("music/" + name, {encoding: "utf8"});
+    let data = fs.readFileSync("../static/music/" + name, {encoding: "utf8"});
     cache[name] = data;
     return data;
 }
