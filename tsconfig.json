@@ -1,0 +1,16 @@
+{
+    "compilerOptions": {
+        "target": "es6",
+        "module": "commonjs",
+        "rootDir": "./",
+        "outDir": "./build",
+        "esModuleInterop": true,
+        "strict": true,
+        "resolveJsonModule": true
+    },
+    "files": [
+        "decl.d.ts",
+        "index.ts",
+        "music.ts"
+    ]
+}
