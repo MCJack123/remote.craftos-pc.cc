@@ -56,7 +56,7 @@ export = function(url: string, isSecure: boolean): express.Router {
             .run();
     });
 
-    route.get("/content/[a-zA-Z0-9+_]{8}.wav", (req, res) => {
+    route.get(/\/content\/(?<file>[a-zA-Z0-9+_]{8})\.wav$/, (req, res) => {
         res.sendFile(req.url.substr(1), {maxAge: 900000, root: "/var/www/html"});
     });
 
