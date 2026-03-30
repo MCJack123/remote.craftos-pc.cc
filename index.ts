@@ -240,7 +240,7 @@ app2.listen(9991, "0.0.0.0");
 if (isSecure) {
     // https://stackoverflow.com/a/7458587/2032154
     const httpApp = express();
-    httpApp.get('*', function(req, res) { 
+    httpApp.get('*_', function(req, res) { 
         const url = getURL(req); 
         res.redirect(url.replace(/^ws/, "http").replace(/\/$/, "") + req.url);
     })
