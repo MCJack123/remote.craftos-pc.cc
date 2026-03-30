@@ -12,6 +12,9 @@ import luamin from "luamin";
 import { collectDefaultMetrics, register, Gauge } from "prom-client";
 import { ip, port, isSecure } from "./config.json";
 import music from "./music";
+import path from "path";
+
+const ACME_DIR = path.resolve(".well-known/acme-challenge");
 
 var crcTable: [number];
 
@@ -152,7 +155,12 @@ app.get("/string_pack.lua", (req, res) => {
 });
 
 app.get("/.well-known/acme-challenge/:file", (req, res) => {
-    fs.readFile(".well-known/acme-challenge/" + req.params.file)
+    const requestedFile = req.params.file;
+    const filePath = path.resolve(ACME_DIR, requestedFile);
+    if (!filePath.startsWith(ACME_DIR + path.sep) && filePath !== ACME_DIR) {
+        return res.status(404).send("404 Not Found");
+    }
+    fs.readFile(filePath)
         .then(data => res.send(data))
         .catch(() => res.status(404).send("404 Not Found"));
 });
