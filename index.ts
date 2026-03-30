@@ -13,9 +13,13 @@ import { collectDefaultMetrics, register, Gauge } from "prom-client";
 import { ip, port, isSecure } from "./config.json";
 import music from "./music";
 import path from "path";
+import rateLimit from "express-rate-limit";
 
 const ACME_DIR = path.resolve(".well-known/acme-challenge");
-
+const acmeLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 30, // limit each IP to 30 requests per minute for ACME challenges
+});
 var crcTable: [number];
 
 function makeCRCTable() {
@@ -154,7 +158,7 @@ app.get("/string_pack.lua", (req, res) => {
     res.send(stringPackFile);
 });
 
-app.get("/.well-known/acme-challenge/:file", (req, res) => {
+app.get("/.well-known/acme-challenge/:file", acmeLimiter, (req, res) => {
     const requestedFile = req.params.file;
     const filePath = path.resolve(ACME_DIR, requestedFile);
     if (!filePath.startsWith(ACME_DIR + path.sep) && filePath !== ACME_DIR) {
